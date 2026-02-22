@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Orion — Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root{
+      --bg:#0b1220; --card:#111a2e; --border:#223154;
+      --muted:#9bb0d1; --text:#e7eefc;
+      --good:#7CFFB2; --bad:#FF7C7C; --warn:#FFD27C;
+      --btn:#1a2a55;
+      --row:#0f1730;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0; padding:18px; background:var(--bg); color:var(--text);
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;
+    }
+    h1{margin:0 0 12px; font-size:20px; font-weight:800;}
+    .top{
+      display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:12px;
+    }
+    .right{margin-left:auto; display:flex; gap:10px; align-items:center; flex-wrap:wrap;}
+    select,input,button{
+      border-radius:10px; border:1px solid var(--border);
+      background:#0f1730; color:var(--text); padding:10px 12px;
+    }
+    button{cursor:pointer; background:var(--btn);}
+    button:hover{filter:brightness(1.1)}
+    button:active{transform:translateY(1px)}
+    .pill{
+      display:inline-block; padding:4px 10px; border:1px solid var(--border);
+      border-radius:999px; color:var(--muted); font-size:12px;
+    }
+    .muted{color:var(--muted); font-size:12px;}
+    .card{
+      background:var(--card); border:1px solid var(--border);
+      border-radius:14px; padding:12px;
+    }
+    .kpis{
+      display:grid; gap:10px; grid-template-columns: repeat(2, minmax(0,1fr));
+    }
+    @media(min-width: 980px){ .kpis{ grid-template-columns: repeat(6, minmax(0,1fr)); } }
+    .kpi{
+      background:#0f1730; border:1px solid var(--border);
+      border-radius:12px; padding:10px; min-height:70px;
+    }
+    .kpi .t{color:var(--muted); font-size:12px;}
+    .kpi .v{font-weight:900; font-size:18px; margin-top:4px;}
+    .ok{color:var(--good);} .bad{color:var(--bad);} .warn{color:var(--warn);}
+    .grid{display:grid; gap:12px; grid-template-columns:1fr; margin-top:12px;}
+    @media(min-width: 980px){ .grid{grid-template-columns: 1fr 1fr;} }
+    canvas{width:100%!important; height:280px!important;}
+    .footer{
+      margin-top:10px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;
+      color:var(--muted); font-size:12px;
+    }
+
+    /* NOC table */
+    .noc-header{display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:space-between;}
+    .noc-controls{display:flex; gap:10px; flex-wrap:wrap; align-items:center;}
+    table{width:100%; border-collapse: collapse; margin-top:10px;}
+    th, td{
+      border-bottom:1px solid var(--border);
+      padding:10px;
+      font-size:13px;
+      text-align:left;
+      vertical-align:middle;
+    }
+    th{color:var(--muted); font-size:12px; font-weight:700;}
+    .chip{
+      display:inline-block; padding:3px 9px; border-radius:999px;
+      border:1px solid var(--border); font-size:12px;
+    }
+    .chip.ok{border-color: rgba(124,255,178,.35);}
+    .chip.warn{border-color: rgba(255,210,124,.35);}
+    .chip.bad{border-color: rgba(255,124,124,.35);}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+    .small{font-size:12px;}
+    .rowbtn{
+      padding:6px 10px; border-radius:10px; border:1px solid var(--border);
+      background:#16224a; color:var(--text); cursor:pointer;
+    }
+    .rowbtn:hover{filter:brightness(1.1)}
+  </style>
+</head>
+
+<body>
+  <h1>Orion — Dashboard (Grafana-like)</h1>
+
+  <div class="top">
+    <span class="pill" id="nowPill">—</span>
+
+    <label class="muted">Estación</label>
+    <select id="device"></select>
+
+    <label class="muted">Ventana</label>
+    <select id="window">
+      <option value="15">15m</option>
+      <option value="60">1h</option>
+      <option value="180">3h</option>
+      <option value="360">6h</option>
+      <option value="720">12h</option>
+      <option value="1440" selected>24h</option>
+      <option value="2880">48h</option>
+      <option value="4320">3d</option>
+      <option value="10080">7d</option>
+    </select>
+
+    <label class="muted">Auto</label>
+    <select id="auto">
+      <option value="0">Off</option>
+      <option value="30">30s</option>
+      <option value="60" selected>60s</option>
+      <option value="120">120s</option>
+    </select>
+
+    <div class="right">
+      <button id="exportCsv">Exportar CSV</button>
+      <button id="refresh">Actualizar</button>
+      <span class="muted" id="status">—</span>
+    </div>
+  </div>
+
+  <!-- NOC / All stations -->
+  <div class="card">
+    <div class="noc-header">
+      <div>
+        <div style="font-weight:800;">Todas las estaciones</div>
+        <div class="muted small">Semáforo: ONLINE si último dato ≤ 10 min. RSSI malo si &lt; -75 dBm.</div>
+      </div>
+      <div class="noc-controls">
+        <input id="filter" placeholder="Filtrar por id o alias..." />
+        <button id="refreshAll">Refrescar lista</button>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Estado</th>
+          <th>device_id</th>
+          <th>alias</th>
+          <th>age</th>
+          <th>T (°C)</th>
+          <th>RH (%)</th>
+          <th>P (hPa)</th>
+          <th>RSSI</th>
+          <th>ver</th>
+        </tr>
+      </thead>
+      <tbody id="nocBody">
+        <tr><td colspan="9" class="muted">Cargando...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- KPIs -->
+  <div class="card" style="margin-top:12px;">
+    <div class="kpis">
+      <div class="kpi"><div class="t">Estado</div><div class="v" id="kState">—</div></div>
+      <div class="kpi"><div class="t">Age</div><div class="v" id="kAge">—</div></div>
+      <div class="kpi"><div class="t">Temp</div><div class="v" id="kT">—</div></div>
+      <div class="kpi"><div class="t">RH</div><div class="v" id="kRH">—</div></div>
+      <div class="kpi"><div class="t">Pres</div><div class="v" id="kP">—</div></div>
+      <div class="kpi"><div class="t">RSSI</div><div class="v" id="kR">—</div></div>
+    </div>
+
+    <div class="footer">
+      <span>Tip: para ventanas largas se usa <b>series_agg</b> (binning) para cargar rápido.</span>
+      <span id="metaPill" class="pill">—</span>
+    </div>
+  </div>
+
+  <!-- Charts -->
+  <div class="grid">
+    <div class="card"><canvas id="cT"></canvas></div>
+    <div class="card"><canvas id="cRH"></canvas></div>
+    <div class="card"><canvas id="cP"></canvas></div>
+    <div class="card"><canvas id="cR"></canvas></div>
+  </div>
+
+<script>
+  // =========================
+  // CONFIG (no se muestra en pantalla)
+  // =========================
+  const API_BASE = "https://datos.alejandropooli.workers.dev"; // <- tu Worker API
+  const ONLINE_S = 10 * 60;
+  const RSSI_BAD = -75;
+
+  const $ = (id) => document.getElementById(id);
+
+  let charts = {};
+  let timer = null;
+
+  // ====== Persistencia ======
+  const LS_KEY = "orion_dash_v1";
+  function loadPrefs(){
+    try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}"); }
+    catch { return {}; }
+  }
+  function savePrefs(p){
+    localStorage.setItem(LS_KEY, JSON.stringify(p));
+  }
+
+  function fmtTs(epoch){
+    if(!epoch) return "—";
+    return new Date(epoch * 1000).toLocaleString();
+  }
+  function fmtAge(age_s){
+    if(age_s === null || age_s === undefined) return "—";
+    if(age_s < 60) return `${age_s}s`;
+    if(age_s < 3600) return `${Math.round(age_s/60)}m`;
+    return `${(age_s/3600).toFixed(1)}h`;
+  }
+  function toNum(v){
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  async function api(path){
+    const r = await fetch(API_BASE + path, { cache: "no-store" });
+    const j = await r.json().catch(() => null);
+    if(!j || !j.ok) {
+      const msg = j?.error ? j.error : `HTTP ${r.status}`;
+      throw new Error(msg);
+    }
+    return j;
+  }
+
+  function makeChart(canvas, label){
+    return new Chart(canvas, {
+      type: "line",
+      data: { labels: [], datasets: [{ label, data: [] }] },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: { legend: { labels: { color: "#e7eefc" } } },
+        scales: {
+          x: { ticks: { color: "#9bb0d1", maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } },
+          y: { ticks: { color: "#9bb0d1" } }
+        }
+      }
+    });
+  }
+
+  function ensureCharts(){
+    if(!charts.t)  charts.t  = makeChart($("cT"),  "Temperatura (°C)");
+    if(!charts.rh) charts.rh = makeChart($("cRH"), "Humedad (%)");
+    if(!charts.p)  charts.p  = makeChart($("cP"),  "Presión (hPa)");
+    if(!charts.r)  charts.r  = makeChart($("cR"),  "RSSI (dBm)");
+  }
+
+  async function loadDevices(trySelectDeviceId){
+    $("status").textContent = "Cargando devices...";
+    const d = await api("/devices");
+    const sel = $("device");
+    sel.innerHTML = "";
+
+    (d.data || []).forEach(x => {
+      const o = document.createElement("option");
+      o.value = x.device_id;
+      o.textContent = x.alias ? `${x.device_id} — ${x.alias}` : x.device_id;
+      sel.appendChild(o);
+    });
+
+    if (trySelectDeviceId) {
+      const exists = Array.from(sel.options).some(o => o.value === trySelectDeviceId);
+      if (exists) sel.value = trySelectDeviceId;
+    }
+
+    $("status").textContent = (d.data || []).length ? "OK" : "Sin devices";
+  }
+
+  function chooseBin(minutes){
+    if(minutes <= 180) return 1;      // <=3h
+    if(minutes <= 720) return 1;      // <=12h
+    if(minutes <= 1440) return 2;     // 24h
+    if(minutes <= 2880) return 5;     // 48h
+    if(minutes <= 4320) return 5;     // 3d
+    return 10;                        // 7d
+  }
+
+  function setKpis(st){
+    const age_s = st?.age_s ?? null;
+    const online = st?.online ?? false;
+
+    $("kState").textContent = online ? "ONLINE" : "OFFLINE";
+    $("kState").className = "v " + (online ? "ok" : (age_s !== null ? "warn" : "bad"));
+
+    $("kAge").textContent = fmtAge(age_s);
+    $("kAge").className = "v " + (age_s === null ? "bad" : (age_s <= ONLINE_S ? "ok" : "warn"));
+
+    const L = st?.latest;
+    $("kT").textContent  = (L?.temp_c ?? "—") + (L ? " °C" : "");
+    $("kRH").textContent = (L?.rh_pct ?? "—") + (L ? " %" : "");
+    $("kP").textContent  = (L?.pres_hpa ?? "—") + (L ? " hPa" : "");
+    $("kR").textContent  = (L?.rssi ?? "—") + (L ? " dBm" : "");
+  }
+
+  function setSeries(data){
+    const clean = (data || []).filter(p => Number.isFinite(Number(p.ts)));
+
+    const labels = clean.map(p => fmtTs(Number(p.ts)));
+
+    charts.t.data.labels = labels;
+    charts.t.data.datasets[0].data = clean.map(p => toNum(p.temp_c));
+    charts.t.update();
+
+    charts.rh.data.labels = labels;
+    charts.rh.data.datasets[0].data = clean.map(p => toNum(p.rh_pct));
+    charts.rh.update();
+
+    charts.p.data.labels = labels;
+    charts.p.data.datasets[0].data = clean.map(p => toNum(p.pres_hpa));
+    charts.p.update();
+
+    charts.r.data.labels = labels;
+    charts.r.data.datasets[0].data = clean.map(p => toNum(p.rssi));
+    charts.r.update();
+  }
+
+  // ===== All stations (NOC) =====
+  let nocCache = [];
+  function statusChip(online, age_s){
+    if (online) return `<span class="chip ok">ONLINE</span>`;
+    if (age_s === null || age_s === undefined) return `<span class="chip bad">NO DATA</span>`;
+    return `<span class="chip warn">OFFLINE</span>`;
+  }
+  function fmtShort(v){
+    const n = Number(v);
+    return Number.isFinite(n) ? n.toFixed(1) : "—";
+  }
+  function fmtRssi(v){
+    const n = Number(v);
+    if (!Number.isFinite(n)) return "—";
+    const cls = (n < RSSI_BAD) ? "bad" : "ok";
+    return `<span class="chip ${cls}">${n} dBm</span>`;
+  }
+
+  function renderNoc(){
+    const q = ($("filter").value || "").trim().toLowerCase();
+    const rows = (nocCache || []).filter(r => {
+      if (!q) return true;
+      return String(r.device_id||"").toLowerCase().includes(q) || String(r.alias||"").toLowerCase().includes(q);
+    });
+
+    const tb = $("nocBody");
+    if (!rows.length){
+      tb.innerHTML = `<tr><td colspan="9" class="muted">Sin resultados.</td></tr>`;
+      return;
+    }
+
+    tb.innerHTML = rows.map(r => {
+      const L = r.latest;
+      return `
+        <tr>
+          <td>${statusChip(r.online, r.age_s)}</td>
+          <td class="mono">${r.device_id}</td>
+          <td>${r.alias ?? "—"}</td>
+          <td class="mono">${fmtAge(r.age_s)}</td>
+          <td class="mono">${L ? fmtShort(L.temp_c) : "—"}</td>
+          <td class="mono">${L ? fmtShort(L.rh_pct) : "—"}</td>
+          <td class="mono">${L ? fmtShort(L.pres_hpa) : "—"}</td>
+          <td>${L ? fmtRssi(L.rssi) : "—"}</td>
+          <td><button class="rowbtn" data-view="${r.device_id}">Ver</button></td>
+        </tr>
+      `;
+    }).join("");
+
+    // bind botones "Ver"
+    tb.querySelectorAll("[data-view]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const id = btn.getAttribute("data-view");
+        $("device").value = id;
+        persistUI();
+        await refresh();
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      });
+    });
+  }
+
+  async function refreshAllStations(){
+    try{
+      $("status").textContent = "Actualizando lista...";
+      const st = await api("/status");
+      nocCache = st.data || [];
+      renderNoc();
+      $("status").textContent = "OK";
+    }catch(e){
+      console.error(e);
+      $("status").textContent = "Error lista: " + (e.message || e);
+    }
+  }
+
+  // ===== CSV Export =====
+  function downloadText(filename, text){
+    const blob = new Blob([text], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function exportCsv(){
+    try{
+      $("status").textContent = "Exportando CSV...";
+      const device = $("device").value;
+      const minutes = Number($("window").value);
+      const bin = chooseBin(minutes);
+
+      const ser = await api(`/series_agg?device_id=${encodeURIComponent(device)}&minutes=${encodeURIComponent(minutes)}&bin=${encodeURIComponent(bin)}`);
+      const rows = ser.data || [];
+
+      const header = "ts_iso,ts_epoch,temp_c,rh_pct,pres_hpa,rssi\n";
+      const lines = rows.map(p => {
+        const ts = Number(p.ts);
+        const iso = Number.isFinite(ts) ? new Date(ts * 1000).toISOString() : "";
+        return [
+          iso,
+          ts,
+          (p.temp_c ?? ""),
+          (p.rh_pct ?? ""),
+          (p.pres_hpa ?? ""),
+          (p.rssi ?? "")
+        ].join(",");
+      }).join("\n");
+
+      const filename = `orion_${device}_${minutes}min_bin${bin}m.csv`;
+      downloadText(filename, header + lines + "\n");
+      $("status").textContent = `CSV listo (${rows.length} filas)`;
+    }catch(e){
+      console.error(e);
+      $("status").textContent = "Error CSV: " + (e.message || e);
+    }
+  }
+
+  // ===== Persist UI =====
+  function persistUI(){
+    const p = loadPrefs();
+    p.device = $("device").value;
+    p.window = $("window").value;
+    p.auto = $("auto").value;
+    savePrefs(p);
+  }
+
+  async function refresh(){
+    try{
+      $("status").textContent = "Actualizando...";
+      $("nowPill").textContent = "Ahora: " + new Date().toLocaleString();
+
+      ensureCharts();
+
+      const device = $("device").value;
+      const minutes = Number($("window").value);
+      const bin = chooseBin(minutes);
+
+      // estado del device
+      const st = await api(`/status?device_id=${encodeURIComponent(device)}`);
+      setKpis(st.data);
+
+      // serie agregada
+      const ser = await api(`/series_agg?device_id=${encodeURIComponent(device)}&minutes=${encodeURIComponent(minutes)}&bin=${encodeURIComponent(bin)}`);
+      setSeries(ser.data || []);
+
+      $("metaPill").textContent = `bin ${bin}m · puntos ${(ser.data||[]).length}`;
+      $("status").textContent = "OK";
+    }catch(e){
+      console.error(e);
+      $("status").textContent = "Error: " + (e.message || e);
+    }
+  }
+
+  function setAuto(){
+    if(timer) { clearInterval(timer); timer = null; }
+    const s = Number($("auto").value);
+    if(s > 0){
+      timer = setInterval(async () => {
+        await refresh();
+        await refreshAllStations(); // mantiene la vista NOC actualizada también
+      }, s * 1000);
+    }
+  }
+
+  // Events
+  $("exportCsv").addEventListener("click", exportCsv);
+  $("refresh").addEventListener("click", async () => { await refresh(); await refreshAllStations(); });
+
+  $("device").addEventListener("change", async () => { persistUI(); await refresh(); });
+  $("window").addEventListener("change", async () => { persistUI(); await refresh(); });
+  $("auto").addEventListener("change", async () => { persistUI(); setAuto(); });
+
+  $("refreshAll").addEventListener("click", refreshAllStations);
+  $("filter").addEventListener("input", renderNoc);
+
+  // Init
+  (async ()=>{
+    try{
+      const prefs = loadPrefs();
+
+      // Cargar devices y aplicar preferencia de device si existe
+      await loadDevices(prefs.device);
+
+      // Aplicar preferencias de UI (window/auto) si existen
+      if (prefs.window) $("window").value = prefs.window;
+      if (prefs.auto) $("auto").value = prefs.auto;
+
+      await refresh();
+      await refreshAllStations();
+      setAuto();
+    }catch(e){
+      console.error(e);
+      $("status").textContent = "Error init: " + (e.message || e);
+    }
+  })();
+</script>
+
+</body>
+</html>
